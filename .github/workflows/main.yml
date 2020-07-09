@@ -1,7 +1,7 @@
 name: CI
 
 on:
-  pull_request:
+  push:
     branches: 
       - master
 
@@ -15,43 +15,28 @@ jobs:
         run: |
           find . -type f -name '*.sh' | wc -l
           find . -type f -name '*.sh' | xargs shellcheck --external-sources
-  build:
+    
+  ppc64le-build:
 
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
+      
+      - name: Build Devfile Registry
+        run: |
+          mkdir -p ~/.ssh && echo -e "${SSH_KEY//_/\\n}" > ~/.ssh/id_ecdsa && chmod og-rwx ~/.ssh/id_ecdsa
+      
+          short_sha=$(git rev-parse --short HEAD)
 
-    - name: Cache docker layers
-      uses: actions/cache@v1
-      with:
-        path: ./caches
-        key: v1-${{ github.head_ref }}
-        
-    - name: Load docker layer cache
-      run: |
-        set +o pipefail
-        docker load -i ./caches/app.tar | true
-    
-    - name: Build devfile registry
-      run: |
-        docker build \
-          --cache-from=app \
-          -t app \
-          -f ./build/dockerfiles/Dockerfile \
-          --target registry .
-           
-    - name: Cache docker layers
-      run: |
-        mkdir -p ./caches
-        docker save -o ./caches/app.tar app
-    
-    - name: Build offline devfile registry
-      run: |
-        docker build \
-          --cache-from=app \
-          -t app \
-          -f ./build/dockerfiles/Dockerfile \
-          --target offline-registry .
-   
+          rsync -arz -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" --progress --delete --exclude '.git' . ubuntu@140.211.169.180:/var/tmp/"$short_sha"
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t ubuntu@140.211.169.180 "cd /var/tmp/$short_sha; sudo docker build -t app -f ./build/dockerfiles/Dockerfile --target registry .; sudo docker build -t app -f ./build/dockerfiles/Dockerfile --target offline-registry ."
+          build_result=$?
 
+          # Cleanup, if required
+          ##ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@140.211.169.180 "rm -rf /var/tmp/'$short_sha'; sudo docker rmi $(sudo docker images -aq)"
+
+          echo "Test exit code: $build_result"
+          exit $build_result
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
