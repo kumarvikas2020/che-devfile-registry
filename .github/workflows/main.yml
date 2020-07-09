@@ -1,6 +1,9 @@
 name: CI
 
 on:
+  pull_request:
+    branches: 
+      - master
   push:
     branches: 
       - master
@@ -16,6 +19,45 @@ jobs:
           find . -type f -name '*.sh' | wc -l
           find . -type f -name '*.sh' | xargs shellcheck --external-sources
     
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+
+    - name: Cache docker layers
+      uses: actions/cache@v1
+      with:
+        path: ./caches
+        key: v1-${{ github.head_ref }}
+        
+    - name: Load docker layer cache
+      run: |
+        set +o pipefail
+        docker load -i ./caches/app.tar | true
+    
+    - name: Build devfile registry
+      run: |
+        docker build \
+          --cache-from=app \
+          -t app \
+          -f ./build/dockerfiles/Dockerfile \
+          --target registry .
+           
+    - name: Cache docker layers
+      run: |
+        mkdir -p ./caches
+        docker save -o ./caches/app.tar app
+    
+    - name: Build offline devfile registry
+      run: |
+        docker build \
+          --cache-from=app \
+          -t app \
+          -f ./build/dockerfiles/Dockerfile \
+          --target offline-registry .
+
   ppc64le-build:
 
     runs-on: ubuntu-latest
